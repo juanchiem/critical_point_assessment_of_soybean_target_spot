@@ -1,0 +1,298 @@
+---
+title: "Critical single-point assessment for soybean target spot"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=TRUE, echo = FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse) ; library(readxl) ; library(broom) ; library(knitr)
+
+plot_to_ha_13 <- function(plot_kg, hum, mts, width_row, hfin){
+  (10000 * plot_kg/(mts*width_row))*(1-hum/100)/(1-hfin) }
+
+theme_juan <- function (base_size, legend_pos, leg_jus ) {
+  theme_bw(9) %+replace% 
+            theme(
+              panel.grid.minor = element_blank(),
+              panel.grid.major = element_blank(),
+              legend.position=legend_pos,
+              legend.justification= leg_jus,
+              legend.margin=margin(1,1,1,1)
+              )
+}
+```
+
+```{r data 1, eval=FALSE}
+harvest1 <- read_excel(
+"C:/Users/Juan/Dropbox/Projeto_tese/Ch5_Canopy_portions/data/dat_dates.xlsx", 
+sheet = "harvest1")  %>% 
+  mutate(kg_ha_13 = round(plot_to_ha_13(plot_kg, hum, 8, 0.5, 0.13),1))
+
+exp1 <- read_excel(
+"C:/Users/Juan/Dropbox/Projeto_tese/Ch5_Canopy_portions/data/dat_dates.xlsx", 
+                   sheet = "exp1", na = "empty") %>%   
+  mutate(date = as.Date(date, "%d/%m/%Y", origin="2014-12-29"), 
+         sev = sev/100,
+         def = def/100) %>% 
+  mutate_if(is.character,as.factor) 
+```
+
+```{r data 2, eval=FALSE}
+harvest2 <- read_excel(
+"C:/Users/Juan/Dropbox/Projeto_tese/Ch5_Canopy_portions/data/dat_dates.xlsx", 
+sheet = "harvest2")  %>% 
+  mutate(kg_ha_13 = round(plot_to_ha_13(plot_kg, hum, 8, 0.5, 0.13),1))
+
+exp2 <- read_excel(
+"C:/Users/Juan/Dropbox/Projeto_tese/Ch5_Canopy_portions/data/dat_dates.xlsx", 
+sheet = "exp2", na = "empty")  %>%  
+  gather(-(inoc:est), key = "var", value = "val") %>% 
+  separate(var, into=c("GS", "date", "var"), sep = "_") %>%
+  spread(var, val) %>% 
+  mutate(date = as.Date(date), 
+         sev = sev/100,
+         def = def5/5) %>% 
+  mutate_if(is.character,as.factor)
+# table(exp2$GS, exp2$date)
+# plot(harvest2$kg_ha_13 ~ factor(harvest2$parcela))
+# hist(harvest2$kg_ha_13)
+```
+
+```{r data save}
+# both  = bind_rows(exp1 %>% select(study, date, GS, inoc, rep, plot=parcela, est, def, sev), 
+#           exp2 %>% select(study, date, GS, inoc, rep, plot=parcela, est, def, sev)) 
+
+# save(both, exp1,exp2, harvest1, harvest2, file ="./Projeto_tese/C4_Dano/R_campo/data/campo.Rdata")
+# setwd("C:/Users/Juan/Dropbox")
+load(
+"C:/Users/Juan/Dropbox/Projeto_tese/Ch5_Canopy_portions/data/campo.Rdata")
+```
+
+```{r create weights}
+both_w = both %>% 
+  mutate(w1 = case_when(
+    est == "i"  ~ 1,
+    est == "m"  ~ 0,
+    est == "s"  ~ 0),
+    i1 = (def + (1-def) * replace(sev, is.na(sev),0)) * w1 )%>% 
+
+  mutate(w2 = case_when(
+    est == "i"  ~ 0,
+    est == "m"  ~ 1,
+    est == "s"  ~ 0),
+    i2 = (def + (1-def) * replace(sev, is.na(sev),0)) * w2 )%>% 
+  
+  mutate(w3 = case_when(
+    est == "i"  ~ 0.33,
+    est == "m"  ~ 0.33,
+    est == "s"  ~ 0.33),
+    i3 = (def + (1-def) * replace(sev, is.na(sev),0)) * w3 )%>% 
+  
+  mutate(w4 = case_when(
+    est == "i"  ~ 0.5,
+    est == "m"  ~ 0.5,
+    est == "s"  ~ 0),
+    i4 = (def + (1-def) * replace(sev, is.na(sev),0)) * w4 )%>% 
+  
+  mutate(w5 = case_when(
+    est == "i"  ~ 0.3,
+    est == "m"  ~ 0.5,
+    est == "s"  ~ 0.2),
+    i5 = (def + (1-def) * replace(sev, is.na(sev),0)) * w5 )%>% 
+  
+  mutate(w6 = case_when(
+    est == "i"  ~ 0.2,
+    est == "m"  ~ 0.7,
+    est == "s"  ~ 0.1),
+    i6 = (def + (1-def) * replace(sev, is.na(sev),0)) * w6 )%>% 
+  
+  arrange(date, plot, est) %>% mutate_if(is.character,as.factor) 
+```
+
+```{r calculate index 1}
+Rw1  =  both_w %>% filter(study==1) %>%   
+  group_by(date, GS, plot) %>% 
+  summarize(i1 = sum(i1), i2 = sum(i2), i3 = sum(i3), i4 = sum(i4), 
+            i5 = sum(i5), i6 = sum(i6)) %>% 
+  left_join(select(harvest1, plot, kg_ha_13), by="plot") %>% 
+  mutate_if(is.numeric, funs(round(., 2))) %>% 
+  mutate_if(is.character,as.factor)
+```
+
+## Correlation DIs exp1
+
+```{r Correlation 1}
+Rw_corr1 = Rw1 %>% 
+  gather(i1:i6, key = "index", value = "value") %>% 
+  group_by(GS, index) %>% 
+  do(cor.test = tidy(cor.test(.$value, .$kg_ha_13, method = 'pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  select(GS, index,estimate, statistic,p.value) %>% 
+  mutate(estimate = round(estimate,3),
+         stars = cut(p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), 
+                     label=c("***", "**", "*", "")),
+         rval = ifelse(p.value < 0.05, paste(stars, estimate, sep= " "),""),
+         R2 = ifelse(p.value < 0.05, paste(round(estimate^2, 2), "%"),"")) %>% 
+  arrange(estimate) 
+
+kable(Rw_corr1, digits = 3)
+
+range(na.omit(Rw_corr1$estimate))
+
+# with(Rw1 %>% filter(GS == "R5.5"), { 
+#      summary(lm(kg_ha_13 ~ i3)) 
+#      plot(kg_ha_13 ~ i3); abline(lm(kg_ha_13 ~ i3))
+# })
+```
+
+```{r Heat map 1, eval= FALSE}
+ggplot(data = Rw_corr1, aes(x=GS, y=index, fill=estimate)) + 
+  geom_tile(colour = "grey50", na.rm = T) +
+  geom_text(aes(label=rval), color="white", size=2)+
+  scale_fill_gradient(high="grey", low="grey30",na.value="transparent",
+                      guide = guide_colorbar(direction = "horizontal",
+                                             barwidth = 5, barheight = 0.6)) +
+  labs(y="Diseases index", x="Growth stage", fill="Pearson´s r") +
+  theme_juan(8, "top", "center") 
+
+ggsave("C:/Users/Juan/Dropbox/Projeto_tese/C4_Dano/R_campo/plots/heat1_.png", 
+        width = 8, height = 8, dpi = 150, units = "cm", device='png')
+```
+
+## Correlation DIs exp2
+
+```{r calculate index 2}
+Rw2 = both_w %>% filter(study==2) %>% 
+  group_by(date, GS, plot) %>% 
+  summarize(i1 = sum(i1), i2 = sum(i2), i3 = sum(i3), i4 = sum(i4), 
+            i5 = sum(i5), i6 = sum(i6)) %>% 
+  
+  left_join(select(harvest2, plot, kg_ha_13), by="plot") %>%
+  
+  mutate_if(is.numeric, funs(round(., 2))) %>% 
+  mutate_if(is.character,as.factor)
+```
+
+```{r Corr 2}
+Rw_corr2 = Rw2 %>% gather(i1:i6, key = "index", value = "value") %>% 
+  group_by(GS, index) %>% 
+  do(cor.test = tidy(cor.test(.$value, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  select(GS, index,estimate, statistic,p.value) %>% 
+  mutate(estimate = round(estimate,3),
+         stars = cut(p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), 
+                     label=c("***", "**", "*", "")),
+         rval = ifelse(p.value < 0.05, paste(stars, estimate, sep= " "),""),
+         R2 = ifelse(p.value < 0.05, paste(round(estimate^2,2), "%"),"")) %>%  
+           arrange(estimate) 
+
+kable(Rw_corr2, digits = 3)
+         
+range(na.omit(Rw_corr2$estimate))
+```
+
+```{r heat map 2, eval=FALSE}
+ggplot(data = Rw_corr2, aes(x=GS, y=index, fill=estimate)) + 
+  geom_tile(colour = "grey50", na.rm = T) +
+  geom_text(aes(label=rval), color="white", size=2)+
+  scale_fill_gradient(high="grey", low="grey30",na.value="transparent",
+                      guide = guide_colorbar(direction = "horizontal",
+                                             barwidth = 5, barheight = 0.6)) +
+  labs(y="Diseases index", x="Growth stage", fill="Pearson´s r") +
+  theme_juan(8, "top", "center") 
+
+ggsave("./Projeto_tese/C4_Dano/R_campo/plots/heat2.png", 
+        width = 8, height = 8, dpi = 150, units = "cm", device='png')
+```
+
+
+# Defoliation x GS
+
+## Exp 1
+
+```{r}
+exp1 %>% select(plot = parcela, est, GS, def) %>% 
+  group_by(GS, plot) %>% summarise(def_tot = sum(def)) %>% 
+  left_join(select(harvest2, plot, kg_ha_13), by="plot")%>%  
+  group_by(GS) %>% 
+  do(cor.test = tidy(cor.test(.$def_tot, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+```
+
+## Exp 2
+
+```{r}
+exp2 %>% select(plot = parcela, est, GS, def) %>% 
+  group_by(GS, plot) %>% summarise(def_tot = sum(def)) %>% 
+  left_join(select(harvest2, plot, kg_ha_13), by="plot")%>%  
+  group_by(GS) %>% 
+  do(cor.test = tidy(cor.test(.$def_tot, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+```
+
+
+# AUC of disease severity
+
+## Exp 1
+```{r}
+exp1 %>%  
+  group_by(date, plot = parcela) %>% 
+  summarise(sev = mean(sev)) %>% 
+  group_by(plot) %>%
+  summarize(AUC = MESS::auc(as.Date(date), sev, type = "spline")) %>% 
+  left_join(select(harvest1, plot, kg_ha_13), by="plot") %>%  
+  do(cor.test = tidy(cor.test(.$AUC, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+```
+
+## Exp 2
+
+```{r}
+exp2 %>%  
+  group_by(date, plot = parcela) %>% 
+  summarise(sev = mean(sev)) %>% 
+  group_by(plot) %>%
+  summarize(AUC = MESS::auc(as.Date(date), sev, type = "spline")) %>% 
+  left_join(select(harvest1, plot, kg_ha_13), by="plot") %>%  
+  do(cor.test = tidy(cor.test(.$AUC, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+```
+
+# AUC of indexes
+
+## Exp 1
+
+```{r}
+Rw1 %>% 
+  gather( `i1`:`i6`, key = "DI", value = "val") %>% 
+  group_by(DI, plot) %>%
+  summarize(AUC = MESS::auc(as.Date(date), val, type = "spline")) %>% 
+  left_join(select(harvest1, plot, kg_ha_13), by="plot")%>%  
+  group_by(DI) %>% 
+  do(cor.test = tidy(cor.test(.$AUC, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+```
+
+## Exp 2
+
+```{r}
+Rw2 %>% 
+  gather(`i1`:`i6`, key = "DI", value = "val") %>% 
+  group_by(DI, plot) %>%
+  summarize(AUC = MESS::auc(as.Date(date), val, type = "spline")) %>% 
+  left_join(select(harvest2, plot, kg_ha_13), by="plot")%>%  
+  group_by(DI) %>% 
+  do(cor.test = tidy(cor.test(.$AUC, .$kg_ha_13, method='pearson'))) %>%
+  ungroup() %>% unnest() %>% 
+  arrange(estimate) %>% kable(digits = 3)
+
+```
+
